@@ -10,6 +10,7 @@ const {
   mpesaCallback,
   getPayoutLedger,
   markSellerPaid,
+  markSellerPaidBatch,
   checkoutCart,
   getPaymentStatus,
   confirmReceived
@@ -67,5 +68,6 @@ router.put('/:id/confirm-received', protect, confirmReceived);
 // Admin payout routes
 router.get('/admin/payouts/ledger', protect, authorize('admin'), getPayoutLedger);
 router.put('/admin/payouts/:orderId/pay', protect, authorize('admin'), markSellerPaid);
+router.put('/admin/payouts/seller/:sellerId/pay', protect, authorize('admin'), markSellerPaidBatch);
 
 module.exports = router;

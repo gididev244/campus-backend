@@ -474,6 +474,58 @@ exports.markSellerPaid = async (req, res, next) => {
   }
 };
 
+// @desc    Mark all orders for a seller as paid (batch)
+// @route   PUT /api/orders/admin/payouts/seller/:sellerId/pay
+// @access  Private (Admin only)
+exports.markSellerPaidBatch = async (req, res, next) => {
+  try {
+    const { sellerId } = req.params;
+    const { notes } = req.body;
+
+    const result = await Order.updateMany(
+      {
+        seller: sellerId,
+        paymentStatus: 'completed',
+        sellerPaid: false
+      },
+      {
+        sellerPaid: true,
+        sellerPaidAt: Date.now(),
+        sellerPaidBy: req.user.id,
+        sellerPayoutNotes: notes || ''
+      }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No pending payouts found for this seller'
+      });
+    }
+
+    if (global.io) {
+      const seller = await User.findById(sellerId).select('name email');
+      if (seller) {
+        global.io.to(`user:${sellerId}`).emit('payout:processed', {
+          sellerId,
+          ordersUpdated: result.modifiedCount,
+          processedBy: req.user.id,
+          processedAt: new Date().toISOString(),
+          notes: notes || ''
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Marked ${result.modifiedCount} orders as paid`,
+      ordersUpdated: result.modifiedCount
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @desc    Checkout cart (create multiple orders from cart)
 // @route   POST /api/orders/checkout-cart
 // @access  Private (Buyer only)
