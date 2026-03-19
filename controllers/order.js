@@ -214,14 +214,19 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     order.status = status;
 
- 
-    if (status === 'shipped') {
-      order.shippedAt = Date.now();
+    if (status === 'confirmed') {
+      order.confirmedAt = Date.now();
+      
+      const product = await Product.findById(order.product);
+      if (product && product.status !== 'sold') {
+        product.status = 'sold';
+        product.soldAt = Date.now();
+        await product.save();
+      }
     }
 
- 
-    if (status === 'delivered') {
-      order.deliveredAt = Date.now();
+    if (status === 'shipped') {
+      order.shippedAt = Date.now();
     }
 
     if (status === 'delivered') {
@@ -232,7 +237,6 @@ exports.updateOrderStatus = async (req, res, next) => {
       order.cancelledAt = Date.now();
       order.cancellationReason = req.body.reason || 'seller-request';
 
-      // Update product status back to available
       const product = await Product.findById(order.product);
       if (product) {
         product.status = 'available';
@@ -337,6 +341,7 @@ exports.mpesaCallback = async (req, res, next) => {
       const product = await Product.findById(order.product);
       if (product) {
         product.status = 'sold';
+        product.soldAt = Date.now();
         await product.save();
       }
 

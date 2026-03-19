@@ -71,6 +71,10 @@ const productSchema = new mongoose.Schema({
     enum: ['available', 'sold', 'pending'],
     default: 'available'
   },
+  soldAt: {
+    type: Date,
+    default: null
+  },
   isNegotiable: {
     type: Boolean,
     default: false
