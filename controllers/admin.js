@@ -1,6 +1,7 @@
 const Order = require('../models/Order');
 const User = require('../models/User');
 const Product = require('../models/Product');
+const Review = require('../models/Review');
 const SellerBalance = require('../models/SellerBalance');
 const ErrorResponse = require('../middleware/error').ErrorResponse;
 const logger = require('../utils/logger');
@@ -541,62 +542,6 @@ exports.deleteReview = async (req, res, next) => {
   }
 };
 
-/**
- * @desc    Get all messages for moderation
- * @route   GET /api/admin/messages
- * @access  Private (Admin only)
- * @param   {Object} req.query - Query parameters
- * @param   {number} [req.query.page=1] - Page number
- * @param   {number} [req.query.limit=20] - Items per page
- * @param   {string} [req.query.search] - Search by content or user
- * @returns {Promise<Object>} Paginated messages
- */
-exports.getAllMessages = async (req, res, next) => {
-  try {
-    const { page = 1, limit = 20, search } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    const query = {};
-    if (search) {
-      query.$or = [
-        { content: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const messages = await Message.find(query)
-      .populate('sender', 'name email')
-      .populate('receiver', 'name email')
-      .populate('product', 'title')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    const total = await Message.countDocuments(query);
-
-    res.json({
-      success: true,
-      data: messages,
-      pagination: {
-        total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit))
-      }
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * @desc    Flag a message as inappropriate
- * @route   POST /api/admin/messages/:id/flag
- * @access  Private (Admin only)
- * @param   {string} req.params.id - Message ID
- * @param   {Object} req.body - Request body
- * @param   {string} req.body.reason - Reason for flagging
- * @returns {Promise<Object>} Success message
- */
 /**
  * @desc    Get all withdrawal requests
  * @route   GET /api/admin/withdrawals

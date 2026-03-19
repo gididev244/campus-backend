@@ -6,8 +6,6 @@ const {
   getProductAnalytics,
   getAllReviews,
   deleteReview,
-  getAllMessages,
-  flagMessage,
   getWithdrawalRequests,
   processWithdrawalRequest
 } = require('../controllers/admin');
@@ -24,6 +22,10 @@ router.get('/analytics/revenue', getRevenueAnalytics);
 router.get('/analytics/users', getUserAnalytics);
 router.get('/analytics/orders', getOrderAnalytics);
 router.get('/analytics/products', getProductAnalytics);
+
+// Review moderation routes
+router.get('/reviews', getAllReviews);
+router.delete('/reviews/:id', deleteReview);
 
 // Withdrawal management routes
 router.get('/withdrawals', getWithdrawalRequests);
