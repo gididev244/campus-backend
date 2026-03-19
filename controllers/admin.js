@@ -1,11 +1,10 @@
 const Order = require('../models/Order');
 const User = require('../models/User');
 const Product = require('../models/Product');
-const Message = require('../models/Message');
-const Review = require('../models/Review');
 const SellerBalance = require('../models/SellerBalance');
 const ErrorResponse = require('../middleware/error').ErrorResponse;
 const logger = require('../utils/logger');
+const mpesa = require('../utils/mpesa');
 
 /**
  * @desc    Get revenue analytics with trends
@@ -598,32 +597,6 @@ exports.getAllMessages = async (req, res, next) => {
  * @param   {string} req.body.reason - Reason for flagging
  * @returns {Promise<Object>} Success message
  */
-exports.flagMessage = async (req, res, next) => {
-  try {
-    const { reason } = req.body;
-
-    const message = await Message.findById(req.params.id);
-
-    if (!message) {
-      return next(new ErrorResponse('Message not found', 404));
-    }
-
-    // In a real implementation, you might have a FlaggedContent model
-    // For now, we'll just return success
-    res.json({
-      success: true,
-      message: 'Message flagged successfully',
-      data: {
-        messageId: message._id,
-        reason,
-        flaggedAt: new Date()
-      }
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
 /**
  * @desc    Get all withdrawal requests
  * @route   GET /api/admin/withdrawals
@@ -663,9 +636,9 @@ exports.getWithdrawalRequests = async (req, res, next) => {
       success: true,
       data: paginated,
       pagination: {
+        total,
         page: parseInt(page),
         limit: parseInt(limit),
-        total,
         pages: Math.ceil(total / limit)
       }
     });
@@ -708,12 +681,60 @@ exports.processWithdrawalRequest = async (req, res, next) => {
         adminNotes: notes
       };
     } else if (status === 'completed') {
+      const seller = await User.findById(balance.seller);
+
+      if (!seller || !seller.phone) {
+        return next(new ErrorResponse('Seller phone number not found', 400));
+      }
+
+      try {
+        const b2cResult = await mpesa.initiateB2CPayment(
+          seller.phone,
+          withdrawalRequest.amount,
+          requestId,
+          `Payout for withdrawal ${requestId}`
+        );
+
+        withdrawalRequest.metadata = {
+          ...withdrawalRequest.metadata,
+          b2cConversationID: b2cResult.conversationID,
+          b2cOriginatorConversationID: b2cResult.originatorConversationID,
+          b2cResponseCode: b2cResult.responseCode,
+          completedBy: req.user.id,
+          completionNotes: notes
+        };
+        withdrawalRequest.b2cTransactionId = b2cResult.conversationID;
+        withdrawalRequest.b2cStatus = 'processing';
+
+        logger.payment('b2c_initiated_for_withdrawal', {
+          withdrawalId: requestId,
+          sellerId: balance.seller,
+          amount: withdrawalRequest.amount,
+          phone: seller.phone,
+          conversationID: b2cResult.conversationID
+        });
+      } catch (b2cError) {
+        logger.error('B2C payment failed for withdrawal', {
+          withdrawalId: requestId,
+          sellerId: balance.seller,
+          amount: withdrawalRequest.amount,
+          error: b2cError.message
+        });
+
+        withdrawalRequest.status = 'failed';
+        withdrawalRequest.metadata = {
+          ...withdrawalRequest.metadata,
+          b2cError: b2cError.message,
+          failedAt: new Date(),
+          failedBy: req.user.id
+        };
+
+        await balance.save();
+
+        return next(new ErrorResponse(`B2C payment failed: ${b2cError.message}`, 400));
+      }
+
       withdrawalRequest.completedAt = new Date();
-      withdrawalRequest.metadata = {
-        ...withdrawalRequest.metadata,
-        completedBy: req.user.id,
-        completionNotes: notes
-      };
 
       balance.pendingWithdrawals -= withdrawalRequest.amount;
 
@@ -723,7 +744,7 @@ exports.processWithdrawalRequest = async (req, res, next) => {
 
       if (ledgerEntry) {
         ledgerEntry.status = 'completed';
-        ledgerEntry.description = 'Withdrawal completed';
+        ledgerEntry.description = 'Withdrawal completed via M-Pesa B2C';
         ledgerEntry.metadata = {
           ...ledgerEntry.metadata,
           completedAt: new Date(),
@@ -731,13 +752,13 @@ exports.processWithdrawalRequest = async (req, res, next) => {
         };
       }
 
-      // Emit Socket event to seller
       if (global.io) {
         global.io.to(`user:${balance.seller}`).emit('withdrawal:completed', {
           withdrawalId: requestId,
           amount: withdrawalRequest.amount,
           notes,
-          completedAt: new Date().toISOString()
+          completedAt: new Date().toISOString(),
+          b2cTransactionId: withdrawalRequest.b2cTransactionId
         });
 
         logger.info('Withdrawal completed - Socket event emitted', {

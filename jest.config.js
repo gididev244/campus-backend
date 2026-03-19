@@ -40,7 +40,7 @@ module.exports = {
   moduleNameMapper: {
     '^@models/(.*)$': '<rootDir>/models/$1',
     '^@controllers/(.*)$': '<rootDir>/controllers/$1',
-    '^@utils/(.*)$': <rootDir>/utils/$1',
+    '^@utils/(.*)$': '<rootDir>/utils/$1',
     '^@middleware/(.*)$': '<rootDir>/middleware/$1'
   },
 

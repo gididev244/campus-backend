@@ -19,7 +19,6 @@ const logger = require('./utils/logger');
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
 const orderRoutes = require('./routes/orders');
-const messageRoutes = require('./routes/messages');
 const reviewRoutes = require('./routes/reviews');
 const userRoutes = require('./routes/users');
 const categoryRoutes = require('./routes/categories');
@@ -120,7 +119,7 @@ io.on('connection', (socket) => {
     timestamp: new Date().toISOString()
   });
 
-  // Join user's personal room for direct messages
+  // Join user's personal room for notifications
   socket.join(`user:${socket.user.id}`);
 
   // Track online users
@@ -139,40 +138,6 @@ io.on('connection', (socket) => {
   // Handle pong from client (if we send ping from server)
   socket.on('pong', (data) => {
     // Client received our ping and responded
-    // Could track last activity time here if needed
-  });
-
-  // Join conversation room when opening a chat
-  socket.on('join:conversation', ({ userId }) => {
-    const roomName = [socket.user.id, userId].sort().join(':');
-    socket.join(`conversation:${roomName}`);
-    logger.socket('join_conversation', {
-      socketId: socket.id,
-      userId: socket.user.id,
-      conversationWith: userId
-    });
-  });
-
-  // Leave conversation room
-  socket.on('leave:conversation', ({ userId }) => {
-    const roomName = [socket.user.id, userId].sort().join(':');
-    socket.leave(`conversation:${roomName}`);
-    logger.socket('leave_conversation', {
-      socketId: socket.id,
-      userId: socket.user.id,
-      conversationWith: userId
-    });
-  });
-
-  // Typing indicator
-  socket.on('typing:start', ({ userId }) => {
-    const roomName = [socket.user.id, userId].sort().join(':');
-    socket.to(`conversation:${roomName}`).emit('typing:start', { userId: socket.user.id });
-  });
-
-  socket.on('typing:stop', ({ userId }) => {
-    const roomName = [socket.user.id, userId].sort().join(':');
-    socket.to(`conversation:${roomName}`).emit('typing:stop', { userId: socket.user.id });
   });
 
   // Handle client disconnecting
@@ -315,6 +280,11 @@ app.use(cors({
       return callback(null, true);
     }
 
+    // Allow GitHub Codespaces URLs
+    if (origin.includes('.app.github.dev')) {
+      return callback(null, true);
+    }
+
     // Allow custom frontend URL from env
     const frontendUrl = process.env.FRONTEND_URL;
     if (frontendUrl && origin === frontendUrl) {
@@ -439,7 +409,7 @@ app.get('/health/detailed', async (req, res) => {
     api: {
       version: '1.0.0',
       name: 'Campus Market API',
-      description: 'Full-stack campus marketplace with real-time messaging'
+      description: 'Full-stack campus marketplace with real-time notifications'
     },
     database: {
       status: dbStatusMap[dbState] || 'unknown',
@@ -497,7 +467,6 @@ function formatUptime(seconds) {
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/products', productRoutes);
 app.use('/api/v1/orders', orderRoutes);
-app.use('/api/v1/messages', messageRoutes);
 app.use('/api/v1/reviews', reviewRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/categories', categoryRoutes);

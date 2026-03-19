@@ -11,7 +11,8 @@ const {
   getPayoutLedger,
   markSellerPaid,
   checkoutCart,
-  getPaymentStatus
+  getPaymentStatus,
+  confirmReceived
 } = require('../controllers/order');
 const { protect, authorize } = require('../middleware/auth');
 const { handleValidationErrors } = require('../middleware/validation');
@@ -61,6 +62,7 @@ router.put('/:id/status', protect, authorize('seller', 'admin'), updateStatusVal
 
 // Buyer routes
 router.put('/:id/cancel', protect, cancelOrder);
+router.put('/:id/confirm-received', protect, confirmReceived);
 
 // Admin payout routes
 router.get('/admin/payouts/ledger', protect, authorize('admin'), getPayoutLedger);

@@ -23,7 +23,7 @@ const generateToken = (id) => {
  * @param   {Object} req.body - Request body
  * @param   {string} req.body.name - User's full name
  * @param   {string} req.body.email - User's email address
- * @param   {string} req.body.password - User's password (min 12 chars, must contain uppercase, lowercase, number, special char)
+ * @param   {string} req.body.password - User's password (min 6 chars, must contain uppercase, lowercase, number, special char)
  * @param   {string} [req.body.role] - User role (buyer or seller, defaults to buyer)
  * @param   {string} [req.body.phone] - User's phone number
  * @param   {string} [req.body.location] - User's location
@@ -59,8 +59,8 @@ exports.register = async (req, res, next) => {
     }
 
     // Validate password strength before creating user
-    // Must be at least 12 characters
-    if (password.length < 12) {
+    // Must be at least 6 characters
+    if (password.length < 6) {
       logger.auth('register_failed', {
         email,
         ip: req.ip,
@@ -68,11 +68,11 @@ exports.register = async (req, res, next) => {
         success: false,
         reason: 'Password too short'
       });
-      return next(new ErrorResponse('Password must be at least 12 characters long', 400));
+      return next(new ErrorResponse('Password must be at least 6 characters long', 400));
     }
 
     // Must contain uppercase, lowercase, number, and special character
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{12,}$/;
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
     if (!passwordRegex.test(password)) {
       logger.auth('register_failed', {
         email,
@@ -317,7 +317,7 @@ exports.updateProfile = async (req, res, next) => {
  * @access  Private
  * @param   {Object} req.body - Request body
  * @param   {string} req.body.currentPassword - Current password for verification
- * @param   {string} req.body.newPassword - New password (min 12 chars, must contain uppercase, lowercase, number, special char)
+ * @param   {string} req.body.newPassword - New password (min 6 chars, must contain uppercase, lowercase, number, special char)
  * @returns {Promise<Object>} Response with success status and message
  */
 exports.changePassword = async (req, res, next) => {
@@ -328,12 +328,12 @@ exports.changePassword = async (req, res, next) => {
       return next(new ErrorResponse('Please provide current and new password', 400));
     }
 
-    if (newPassword.length < 12) {
-      return next(new ErrorResponse('New password must be at least 12 characters long', 400));
+    if (newPassword.length < 6) {
+      return next(new ErrorResponse('New password must be at least 6 characters long', 400));
     }
 
     // Must contain uppercase, lowercase, number, and special character
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{12,}$/;
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
     if (!passwordRegex.test(newPassword)) {
       return next(new ErrorResponse(
         'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)',
@@ -417,18 +417,18 @@ exports.resetPassword = async (req, res, next) => {
     }
 
     // Validate password length
-    if (newPassword.length < 12) {
+    if (newPassword.length < 6) {
       logger.auth('password_reset_failed', {
         ip: req.ip,
         userAgent: req.get('user-agent'),
         success: false,
         reason: 'Password too short'
       });
-      return next(new ErrorResponse('Password must be at least 12 characters long', 400));
+      return next(new ErrorResponse('Password must be at least 6 characters long', 400));
     }
 
     // Validate password complexity
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{12,}$/;
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
     if (!passwordRegex.test(newPassword)) {
       logger.auth('password_reset_failed', {
         ip: req.ip,

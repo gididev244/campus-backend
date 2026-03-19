@@ -147,10 +147,10 @@ exports.validateEmail = (email) => {
 /**
  * Validate password strength
  * @param {string} password - Password to validate
- * @param {number} minLength - Minimum length (default: 12)
+ * @param {number} minLength - Minimum length (default: 6)
  * @throws {ErrorResponse} If password is too weak
  */
-exports.validatePassword = (password, minLength = 12) => {
+exports.validatePassword = (password, minLength = 6) => {
   if (!password || password.length < minLength) {
     throw new ErrorResponse(
       `Password must be at least ${minLength} characters long`,

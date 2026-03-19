@@ -25,12 +25,6 @@ router.get('/analytics/users', getUserAnalytics);
 router.get('/analytics/orders', getOrderAnalytics);
 router.get('/analytics/products', getProductAnalytics);
 
-// Moderation routes
-router.get('/reviews', getAllReviews);
-router.delete('/reviews/:id', deleteReview);
-router.get('/messages', getAllMessages);
-router.post('/messages/:id/flag', flagMessage);
-
 // Withdrawal management routes
 router.get('/withdrawals', getWithdrawalRequests);
 router.put('/withdrawals/:requestId', processWithdrawalRequest);

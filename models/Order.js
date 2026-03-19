@@ -127,6 +127,42 @@ const orderSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  // Seller payout tracking
+  sellerPaid: {
+    type: Boolean,
+    default: false
+  },
+  sellerPaidAt: {
+    type: Date,
+    default: null
+  },
+  sellerPaidBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  sellerPayoutNotes: {
+    type: String,
+    maxlength: 500
+  },
+  // B2C payout tracking
+  b2cTransactionId: {
+    type: String,
+    default: null
+  },
+  b2cStatus: {
+    type: String,
+    enum: ['pending', 'processing', 'completed', 'failed'],
+    default: null
+  },
+  shippedAt: {
+    type: Date,
+    default: null
+  },
+  checkoutRequestID: {
+    type: String,
+    default: null
+  },
   shippingAddress: {
     street: String,
     city: String,

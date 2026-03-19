@@ -214,6 +214,16 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     order.status = status;
 
+ 
+    if (status === 'shipped') {
+      order.shippedAt = Date.now();
+    }
+
+ 
+    if (status === 'delivered') {
+      order.deliveredAt = Date.now();
+    }
+
     if (status === 'delivered') {
       order.deliveredAt = Date.now();
     }
@@ -564,8 +574,63 @@ exports.getPaymentStatus = async (req, res, next) => {
         mpesaCheckoutRequestID: order.mpesaCheckoutRequestID,
         paymentAmount: order.totalPrice,
         paymentDate: order.paidAt,
-        orderStatus: order.orderStatus
+        orderStatus: order.status
       }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Buyer confirms order received
+ * @route   PUT /api/orders/:id/confirm-received
+ * @access  Private (Buyer only)
+ */
+exports.confirmReceived = async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id)
+      .populate('seller', 'name email phone');
+
+    if (!order) {
+      return next(new ErrorResponse('Order not found', 404));
+    }
+
+    // Check if user is the buyer
+    if (order.buyer.toString() !== req.user.id) {
+      return next(new ErrorResponse('Only the buyer can confirm receipt', 403));
+    }
+
+    // Check if order is shipped
+    if (order.status !== 'shipped') {
+      return next(new ErrorResponse('Can only confirm receipt after order is shipped', 400));
+    }
+
+    // Update order status to delivered
+    order.status = 'delivered';
+    order.deliveredAt = Date.now();
+
+    await order.save();
+
+    // Notify seller via socket
+    if (global.io) {
+      global.io.to(`user:${order.seller._id}`).emit('order:delivered', {
+        orderId: order._id.toString(),
+        orderNumber: order.orderNumber,
+        deliveredAt: order.deliveredAt
+      });
+
+      logger.order('order_delivered', {
+        orderId: order._id,
+        buyerId: req.user.id,
+        sellerId: order.seller._id
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Order confirmed as received',
+      order
     });
   } catch (error) {
     next(error);

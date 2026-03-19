@@ -198,4 +198,153 @@ exports.validatePhoneNumber = (phone) => {
   return cleaned;
 };
 
+/**
+ * Generate security credential for B2C requests
+ * This is the encrypted initiator password
+ * @function
+ * @returns {string} Base64 encoded security credential
+ */
+exports.generateSecurityCredential = () => {
+  const initiatorPassword = mpesaConfig.b2cInitiatorPassword || process.env.MPESA_B2C_INITIATOR_PASSWORD;
+  
+  if (!initiatorPassword) {
+    throw new Error('B2C initiator password not configured');
+  }
+
+  // For sandbox, the credential is just base64 encoded
+  // For production, it needs to be encrypted with M-Pesa public key
+  const env = mpesaConfig.baseURL.includes('sandbox') ? 'sandbox' : 'production';
+  
+  if (env === 'sandbox') {
+    return Buffer.from(initiatorPassword).toString('base64');
+  }
+
+  // For production, we would need to encrypt with the M-Pesa public key
+  // This requires the certificate file from Safaricom
+  // For now, assume the security credential is provided directly
+  return mpesaConfig.b2cSecurityCredential || process.env.MPESA_B2C_SECURITY_CREDENTIAL;
+};
+
+/**
+ * Initiate M-Pesa B2C Payment (Business to Customer)
+ * Used for sending money from business to customer (withdrawals/payouts)
+ * @async
+ * @function
+ * @param {string} phoneNumber - Recipient phone number (format: 254XXXXXXXXX or 07XXXXXXXX)
+ * @param {number} amount - Amount to send in KES
+ * @param {string} transactionId - Unique transaction identifier for reference
+ * @param {string} [remarks] - Optional remarks for the transaction
+ * @returns {Promise<Object>} Response object with conversationID and originatorConversationID
+ * @throws {Error} If B2C payment initiation fails
+ */
+exports.initiateB2CPayment = async (phoneNumber, amount, transactionId, remarks = 'Seller payout') => {
+  try {
+    const token = await this.generateToken();
+    const securityCredential = this.generateSecurityCredential();
+    
+    // Normalize phone number
+    const normalizedPhone = this.validatePhoneNumber(phoneNumber);
+    
+    const payload = {
+      InitiatorName: mpesaConfig.b2cInitiatorName || process.env.MPESA_B2C_INITIATOR_NAME,
+      SecurityCredential: securityCredential,
+      CommandID: 'BusinessPayment', // BusinessPayment for payouts
+      Amount: Math.round(amount),
+      PartyA: mpesaConfig.shortcode,
+      PartyB: normalizedPhone,
+      Remarks: remarks,
+      QueueTimeOutURL: mpesaConfig.b2cQueueTimeoutURL || `${process.env.API_URL}/api/v1/payments/b2c/timeout`,
+      ResultURL: mpesaConfig.b2cResultURL || `${process.env.API_URL}/api/v1/payments/b2c/result`,
+      Occassion: transactionId // Using Occassion field to store transaction ID for tracking
+    };
+
+    const response = await axios.post(
+      `${mpesaConfig.baseURL}/mpesa/b2c/v1/paymentrequest`,
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    logger.payment('b2c_initiated', {
+      transactionId,
+      amount: Math.round(amount),
+      phone: normalizedPhone,
+      conversationID: response.data.ConversationID,
+      originatorConversationID: response.data.OriginatorConversationID,
+      responseCode: response.data.ResponseCode,
+      success: true
+    });
+
+    return {
+      success: true,
+      conversationID: response.data.ConversationID,
+      originatorConversationID: response.data.OriginatorConversationID,
+      responseCode: response.data.ResponseCode,
+      responseDescription: response.data.ResponseDescription
+    };
+  } catch (error) {
+    logger.payment('b2c_failed', {
+      transactionId,
+      amount: Math.round(amount),
+      phone: phoneNumber,
+      error: error.response?.data || error.message,
+      success: false
+    });
+    throw new Error(error.response?.data?.errorMessage || 'Failed to initiate B2C payment');
+  }
+};
+
+/**
+ * Query the status of a B2C transaction
+ * @async
+ * @function
+ * @param {string} conversationID - Conversation ID from B2C initiation
+ * @returns {Promise<Object>} Status response with transaction details
+ * @throws {Error} If query fails
+ */
+exports.queryB2CStatus = async (conversationID) => {
+  try {
+    const token = await this.generateToken();
+    const securityCredential = this.generateSecurityCredential();
+
+    const payload = {
+      Initiator: mpesaConfig.b2cInitiatorName || process.env.MPESA_B2C_INITIATOR_NAME,
+      SecurityCredential: securityCredential,
+      CommandID: 'TransactionStatusQuery',
+      TransactionID: conversationID,
+      PartyA: mpesaConfig.shortcode,
+      IdentifierType: '4', // Organization shortcode
+      ResultURL: mpesaConfig.b2cResultURL || `${process.env.API_URL}/api/v1/payments/b2c/status`,
+      QueueTimeOutURL: mpesaConfig.b2cQueueTimeoutURL || `${process.env.API_URL}/api/v1/payments/b2c/timeout`,
+      Remarks: 'Transaction status query',
+      Occassion: 'Query'
+    };
+
+    const response = await axios.post(
+      `${mpesaConfig.baseURL}/mpesa/transactionstatus/v1/query`,
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return {
+      success: true,
+      conversationID: response.data.ConversationID,
+      originatorConversationID: response.data.OriginatorConversationID,
+      responseCode: response.data.ResponseCode
+    };
+  } catch (error) {
+    console.error('B2C status query error:', error.response?.data || error.message);
+    throw new Error('Failed to query B2C transaction status');
+  }
+};
+
 module.exports = exports;

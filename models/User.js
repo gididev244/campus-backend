@@ -12,7 +12,7 @@ const bcrypt = require('bcryptjs');
  * @typedef {Object} User
  * @property {string} name - User's full name (required, max 50 chars)
  * @property {string} email - User's email address (required, unique, valid format)
- * @property {string} password - Hashed password (required, min 12 chars, must contain uppercase, lowercase, number, special char)
+ * @property {string} password - Hashed password (required, min 6 chars, must contain uppercase, lowercase, number, special char)
  * @property {'buyer'|'seller'|'admin'} role - User's role for authorization (default: 'buyer')
  * @property {string} phone - User's phone number (required, valid format)
  * @property {string|null} avatar - Profile avatar image URL
@@ -47,12 +47,12 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     required: [true, 'Please provide a password'],
-    minlength: [12, 'Password must be at least 12 characters long'],
+    minlength: [6, 'Password must be at least 6 characters long'],
     validate: {
       validator: function(value) {
         // At least one uppercase, one lowercase, one number, one special character
-        // And must be at least 12 characters (enforced by regex too)
-        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{12,}$/;
+        // And must be at least 6 characters (enforced by regex too)
+        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
         return passwordRegex.test(value);
       },
       message: 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)'

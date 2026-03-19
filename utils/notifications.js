@@ -1,11 +1,10 @@
 /**
  * @fileoverview Notification utilities for real-time updates
- * @description Helper functions to create, emit, and track notifications and messages via Socket.io
+ * @description Helper functions to create, emit, and track notifications via Socket.io
  * @module utils/notifications
  */
 
 const Notification = require('../models/Notification');
-const Message = require('../models/Message');
 
 /**
  * Emit notification via Socket.io to a specific user
@@ -62,20 +61,6 @@ const getNotificationUnreadCount = async (userId) => {
 };
 
 /**
- * Get unread count for messages
- * @param {string} userId - User ID (receiver)
- * @param {string} senderId - Sender ID (optional, if you want count from specific sender)
- * @returns {Promise<number>} Unread message count
- */
-const getMessageUnreadCount = async (userId, senderId = null) => {
-  const query = { receiver: userId, isRead: false };
-  if (senderId) {
-    query.sender = senderId;
-  }
-  return await Message.countDocuments(query);
-};
-
-/**
  * Emit unread count update via Socket.io
  * @param {string} userId - User ID to emit to
  * @param {number} count - Unread count
@@ -91,6 +76,5 @@ module.exports = {
   emitNotification,
   createNotification,
   getNotificationUnreadCount,
-  getMessageUnreadCount,
   emitUnreadCount
 };
