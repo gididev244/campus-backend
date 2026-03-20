@@ -202,6 +202,8 @@ exports.deleteUser = async (req, res, next) => {
 exports.getDashboardStats = async (req, res, next) => {
   try {
     const userId = req.user.id;
+    const mongoose = require('mongoose');
+    const userObjectId = new mongoose.Types.ObjectId(userId);
 
     // Check cache first
     const cached = getCachedDashboardStats(userId);
@@ -221,7 +223,7 @@ exports.getDashboardStats = async (req, res, next) => {
     ] = await Promise.all([
       // Product stats aggregation
       Product.aggregate([
-        { $match: { seller: userId } },
+        { $match: { seller: userObjectId } },
         {
           $group: {
             _id: null,
@@ -231,13 +233,16 @@ exports.getDashboardStats = async (req, res, next) => {
             },
             sold: {
               $sum: { $cond: [{ $eq: ['$status', 'sold'] }, 1, 0] }
+            },
+            pending: {
+              $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] }
             }
           }
         }
       ]),
       // Order stats aggregation
       Order.aggregate([
-        { $match: { seller: userId } },
+        { $match: { seller: userObjectId } },
         {
           $group: {
             _id: null,
@@ -261,13 +266,13 @@ exports.getDashboardStats = async (req, res, next) => {
         }
       ]),
       // Recent products - lean() for better performance
-      Product.find({ seller: userId })
+      Product.find({ seller: userObjectId })
         .select('title price images status views createdAt')
         .sort({ createdAt: -1 })
         .limit(5)
         .lean(),
       // Recent orders - only select needed fields to reduce data transfer
-      Order.find({ seller: userId })
+      Order.find({ seller: userObjectId })
         .select('orderNumber status totalPrice paymentStatus createdAt product buyer')
         .populate('product', POPULATE_FIELDS.PRODUCT_BASIC)
         .populate('buyer', POPULATE_FIELDS.USER_BASIC)
@@ -276,7 +281,7 @@ exports.getDashboardStats = async (req, res, next) => {
         .lean()
     ]);
 
-    const stats = productStats[0] || { total: 0, available: 0, sold: 0 };
+    const stats = productStats[0] || { total: 0, available: 0, sold: 0, pending: 0 };
     const orderStatsData = orderStats[0] || { total: 0, pending: 0, delivered: 0, totalRevenue: 0 };
 
     const responseData = {
@@ -285,7 +290,8 @@ exports.getDashboardStats = async (req, res, next) => {
         products: {
           total: stats.total,
           available: stats.available,
-          sold: stats.sold
+          sold: stats.sold,
+          pending: stats.pending
         },
         orders: {
           total: orderStatsData.total,
