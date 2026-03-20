@@ -210,7 +210,24 @@ if (process.env.NODE_ENV === 'development') {
   }, 5 * 60 * 1000); // 5 minutes
 }
 
-// Connect to database
+const PORT = process.env.PORT || 5000;
+
+server.listen(PORT, '0.0.0.0', () => {
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`
+    ╔═══════════════════════════════════════╗
+    ║   Campus Market API Server           ║
+    ╠═══════════════════════════════════════╣
+    ║   Environment: ${process.env.NODE_ENV || 'development'}                      ║
+    ║   Port: ${PORT}                           ║
+    ║   URL: http://localhost:${PORT}           ║
+    ║   Socket.io: Enabled                    ║
+    ╚═══════════════════════════════════════╝
+    `);
+  }
+});
+
+// Connect to database (async, doesn't block server startup)
 connectDB();
 
 // Create a custom Morgan token for user ID
@@ -483,24 +500,6 @@ app.use('/api/v1/payments', paymentRoutes);
 // Error handling
 app.use(notFound);
 app.use(errorHandler);
-
-// Start server
-const PORT = process.env.PORT || 5000;
-
-server.listen(PORT, () => {
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`
-    ╔═══════════════════════════════════════╗
-    ║   Campus Market API Server           ║
-    ╠═══════════════════════════════════════╣
-    ║   Environment: ${process.env.NODE_ENV || 'development'}                      ║
-    ║   Port: ${PORT}                           ║
-    ║   URL: http://localhost:${PORT}           ║
-    ║   Socket.io: Enabled                    ║
-    ╚═══════════════════════════════════════╝
-    `);
-  }
-});
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
