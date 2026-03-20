@@ -28,6 +28,7 @@ const notificationRoutes = require('./routes/notifications');
 const uploadRoutes = require('./routes/upload');
 const adminRoutes = require('./routes/admin');
 const sellerRoutes = require('./routes/sellers');
+const paymentRoutes = require('./routes/payments');
 
 // Initialize express app and HTTP server
 const app = express();
@@ -477,6 +478,7 @@ app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/upload', uploadRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/sellers', sellerRoutes);
+app.use('/api/v1/payments', paymentRoutes);
 
 // Error handling
 app.use(notFound);
