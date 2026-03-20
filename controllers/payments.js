@@ -363,4 +363,118 @@ exports.getB2CPayoutStatus = async (req, res, next) => {
   }
 };
 
+const triggerAutoPayout = async (orderId) => {
+  const Order = require('../models/Order');
+  const SellerBalance = require('../models/SellerBalance');
+  const User = require('../models/User');
+
+  try {
+    const order = await Order.findById(orderId)
+      .populate('seller', 'name email phone mpesaNumber');
+
+    if (!order) {
+      console.error(`[AutoPayout] Order ${orderId} not found`);
+      return;
+    }
+
+    if (order.sellerPaid) {
+      console.log(`[AutoPayout] Order ${orderId} already paid`);
+      return;
+    }
+
+    if (order.status !== 'delivered') {
+      console.log(`[AutoPayout] Order ${orderId} not delivered yet`);
+      return;
+    }
+
+    if (order.paymentStatus !== 'completed') {
+      console.log(`[AutoPayout] Order ${orderId} payment not completed`);
+      return;
+    }
+
+    const sellerPhone = order.seller?.mpesaNumber || order.seller?.phone;
+    if (!sellerPhone) {
+      console.error(`[AutoPayout] Seller ${order.seller._id} has no phone number`);
+      return;
+    }
+
+    const balance = await SellerBalance.findOne({ seller: order.seller._id });
+    if (!balance || balance.currentBalance < order.totalPrice) {
+      console.error(`[AutoPayout] Insufficient balance for seller ${order.seller._id}`);
+      return;
+    }
+
+    const formattedPhone = sellerPhone.toString().replace(/\D/g, '');
+    const phoneWithCountryCode = formattedPhone.startsWith('254') 
+      ? formattedPhone 
+      : '254' + formattedPhone.slice(-9);
+
+    const b2cPayload = {
+      InitiatorName: process.env.MPESA_B2C_INITIATOR_NAME || 'CAMPUS_MARKET',
+      SecurityCredential: process.env.MPESA_B2C_SECURITY_CREDENTIAL,
+      CommandID: process.env.MPESA_B2C_COMMAND_ID || 'BusinessPayment',
+      Amount: order.totalPrice,
+      PartyA: process.env.MPESA_B2C_SHORTCODE || '600988',
+      PartyB: phoneWithCountryCode,
+      Remarks: `Payout for order ${order.orderNumber}`,
+      QueueTimeOutURL: `${process.env.BACKEND_URL}/api/v1/payments/b2c/timeout`,
+      ResultURL: `${process.env.BACKEND_URL}/api/v1/payments/b2c/result`
+    };
+
+    console.log(`[AutoPayout] Initiating B2C payout for order ${order.orderNumber}`);
+
+    const b2cResponse = await initiateB2CPayout(b2cPayload);
+
+    order.b2cConversationID = b2cResponse.ConversationID;
+    order.b2cStatus = 'processing';
+    await order.save();
+
+    const payoutEntry = {
+      type: 'withdrawal',
+      amount: order.totalPrice,
+      balance: balance.currentBalance - order.totalPrice,
+      description: `Auto-payout for order ${order.orderNumber}`,
+      status: 'pending',
+      orderId: order._id,
+      b2cConversationID: b2cResponse.ConversationID,
+      date: new Date()
+    };
+
+    balance.ledger.push(payoutEntry);
+    balance.currentBalance -= order.totalPrice;
+    balance.withdrawnTotal = (balance.withdrawnTotal || 0) + order.totalPrice;
+    await balance.save();
+
+    order.sellerPaid = true;
+    order.sellerPaidAt = Date.now();
+    order.b2cStatus = 'completed';
+    await order.save();
+
+    console.log(`[AutoPayout] Payout completed for order ${order.orderNumber}`);
+
+    if (global.io) {
+      global.io.to(`user:${order.seller._id}`).emit('payout:completed', {
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        amount: order.totalPrice,
+        message: 'Payout completed!'
+      });
+    }
+
+    logger.info('Auto-payout completed', {
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+      sellerId: order.seller._id,
+      amount: order.totalPrice
+    });
+
+  } catch (error) {
+    console.error(`[AutoPayout] Error for order ${orderId}:`, error);
+    logger.error('Auto-payout failed', {
+      orderId,
+      error: error.message
+    });
+  }
+};
+
 module.exports = exports;

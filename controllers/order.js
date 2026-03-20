@@ -208,7 +208,18 @@ exports.updateOrderStatus = async (req, res, next) => {
     }
 
     // Validate status transition
-    const validTransitions = {
+    // Seller can only: confirmed → shipped, confirmed → cancelled
+    // Admin can do any transition
+    // Buyer can only: shipped → delivered (via confirm-received endpoint)
+    const sellerTransitions = {
+      confirmed: ['shipped', 'cancelled'],
+      shipped: [],
+      delivered: [],
+      cancelled: [],
+      refunded: []
+    };
+
+    const adminTransitions = {
       pending: ['confirmed', 'cancelled'],
       confirmed: ['shipped', 'cancelled'],
       shipped: ['delivered', 'cancelled'],
@@ -217,22 +228,13 @@ exports.updateOrderStatus = async (req, res, next) => {
       refunded: []
     };
 
-    if (!validTransitions[order.status].includes(status)) {
+    const validTransitions = req.user.role === 'admin' ? adminTransitions : sellerTransitions;
+
+    if (!validTransitions[order.status] || !validTransitions[order.status].includes(status)) {
       return next(new ErrorResponse(`Cannot change status from ${order.status} to ${status}`, 400));
     }
 
     order.status = status;
-
-    if (status === 'confirmed') {
-      order.confirmedAt = Date.now();
-      
-      const product = await Product.findById(order.product);
-      if (product && product.status !== 'sold') {
-        product.status = 'sold';
-        product.soldAt = Date.now();
-        await product.save();
-      }
-    }
 
     if (status === 'shipped') {
       order.shippedAt = Date.now();
@@ -799,8 +801,17 @@ exports.confirmReceived = async (req, res, next) => {
     // Update order status to delivered
     order.status = 'delivered';
     order.deliveredAt = Date.now();
+    order.autoConfirmed = false;
 
     await order.save();
+
+    // Trigger auto-payout
+    try {
+      const { triggerAutoPayout } = require('../controllers/payments');
+      await triggerAutoPayout(order._id.toString());
+    } catch (payoutError) {
+      console.error('Auto-payout failed:', payoutError);
+    }
 
     // Notify seller via socket
     if (global.io) {

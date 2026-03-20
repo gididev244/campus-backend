@@ -176,6 +176,10 @@ const orderSchema = new mongoose.Schema({
   },
   cancelledAt: Date,
   deliveredAt: Date,
+  autoConfirmed: {
+    type: Boolean,
+    default: false
+  },
   cancellationReason: {
     type: String,
     enum: ['buyer-request', 'seller-request', 'payment-failed', 'other'],
