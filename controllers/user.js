@@ -211,13 +211,11 @@ exports.getDashboardStats = async (req, res, next) => {
 
     const Product = require('../models/Product');
     const Order = require('../models/Order');
-    const Message = require('../models/Message');
 
     // Run all independent queries in parallel for better performance
     const [
       productStats,
       orderStats,
-      unreadMessages,
       recentProducts,
       recentOrders
     ] = await Promise.all([
@@ -262,8 +260,6 @@ exports.getDashboardStats = async (req, res, next) => {
           }
         }
       ]),
-      // Unread messages count
-      Message.countDocuments({ receiver: userId, isRead: false }),
       // Recent products - lean() for better performance
       Product.find({ seller: userId })
         .select('title price images status views createdAt')
@@ -296,8 +292,7 @@ exports.getDashboardStats = async (req, res, next) => {
           pending: orderStatsData.pending,
           completed: orderStatsData.delivered
         },
-        revenue: orderStatsData.totalRevenue,
-        unreadMessages
+        revenue: orderStatsData.totalRevenue
       },
       recentProducts,
       recentOrders
