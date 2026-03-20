@@ -730,4 +730,149 @@ exports.processWithdrawalRequest = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Get user balance and financial details (Admin only)
+ * @route   GET /api/v1/admin/users/:userId/balance
+ * @access  Private (Admin only)
+ */
+exports.getUserBalance = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await User.findById(userId).select('name email phone role');
+    if (!user) {
+      return next(new ErrorResponse('User not found', 404));
+    }
+
+    if (user.role !== 'seller') {
+      return res.json({
+        success: true,
+        data: {
+          user,
+          isSeller: false,
+          message: 'User is not a seller'
+        }
+      });
+    }
+
+    let balance = await SellerBalance.findOne({ seller: userId }).lean();
+
+    if (!balance) {
+      balance = {
+        seller: userId,
+        totalEarnings: 0,
+        currentBalance: 0,
+        pendingWithdrawals: 0,
+        withdrawnTotal: 0,
+        totalOrders: 0,
+        withdrawalRequests: [],
+        ledger: []
+      };
+    }
+
+    const pendingWithdrawals = balance.withdrawalRequests?.filter(
+      w => w.status === 'pending' || w.status === 'processing'
+    ) || [];
+
+    const completedWithdrawals = balance.withdrawalRequests?.filter(
+      w => w.status === 'completed'
+    ) || [];
+
+    const recentLedger = (balance.ledger || [])
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, 20);
+
+    res.json({
+      success: true,
+      data: {
+        user,
+        isSeller: true,
+        balance: {
+          totalEarnings: balance.totalEarnings || 0,
+          currentBalance: balance.currentBalance || 0,
+          pendingWithdrawals: balance.pendingWithdrawals || 0,
+          withdrawnTotal: balance.withdrawnTotal || 0,
+          totalOrders: balance.totalOrders || 0
+        },
+        pendingWithdrawals,
+        completedWithdrawals,
+        recentLedger,
+        withdrawalRequestsCount: {
+          pending: pendingWithdrawals.length,
+          completed: completedWithdrawals.length,
+          total: balance.withdrawalRequests?.length || 0
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Get all users with seller balance summary (Admin only)
+ * @route   GET /api/v1/admin/users/with-balances
+ * @access  Private (Admin only)
+ */
+exports.getUsersWithBalances = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 20, role, search } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = {};
+    if (role) query.role = role;
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const users = await User.find(query)
+      .select('-password -resetPasswordToken -resetPasswordExpire')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    const total = await User.countDocuments(query);
+
+    const sellerIds = users.filter(u => u.role === 'seller').map(u => u._id);
+    const balances = await SellerBalance.find({ seller: { $in: sellerIds } }).lean();
+
+    const balanceMap = {};
+    balances.forEach(b => {
+      balanceMap[b.seller.toString()] = {
+        currentBalance: b.currentBalance || 0,
+        totalEarnings: b.totalEarnings || 0,
+        withdrawnTotal: b.withdrawnTotal || 0,
+        pendingWithdrawals: b.pendingWithdrawals || 0
+      };
+    });
+
+    const usersWithBalance = users.map(user => ({
+      ...user,
+      balance: user.role === 'seller' ? (balanceMap[user._id.toString()] || {
+        currentBalance: 0,
+        totalEarnings: 0,
+        withdrawnTotal: 0,
+        pendingWithdrawals: 0
+      }) : null
+    }));
+
+    res.json({
+      success: true,
+      data: usersWithBalance,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = exports;
