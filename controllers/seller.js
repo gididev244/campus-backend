@@ -5,6 +5,7 @@
  */
 
 const SellerBalance = require('../models/SellerBalance');
+const Order = require('../models/Order');
 const ErrorResponse = require('../utils/appError');
 const logger = require('../utils/logger');
 
@@ -22,10 +23,12 @@ exports.getSellerBalance = async (req, res, next) => {
 
     logger.info('Fetching seller balance', { sellerId });
 
-    // Get or create seller balance
     let balance = await SellerBalance.getOrCreate(sellerId);
 
-    // Return balance details with ledger
+    const pendingWithdrawals = balance.withdrawalRequests.filter(w => w.status === 'pending');
+    const releasedWithdrawals = balance.withdrawalRequests.filter(w => w.status === 'released');
+    const processingWithdrawals = balance.withdrawalRequests.filter(w => w.status === 'processing');
+
     res.json({
       success: true,
       data: {
@@ -36,6 +39,30 @@ exports.getSellerBalance = async (req, res, next) => {
         pendingWithdrawals: balance.pendingWithdrawals,
         withdrawnTotal: balance.withdrawnTotal,
         lastUpdated: balance.lastUpdated,
+        pendingWithdrawalCount: pendingWithdrawals.length,
+        releasedWithdrawalCount: releasedWithdrawals.length,
+        withdrawalSummary: {
+          pending: pendingWithdrawals.map(w => ({
+            id: w._id,
+            amount: w.amount,
+            requestedAt: w.requestedAt,
+            status: 'pending',
+            message: 'Waiting for buyer to confirm delivery'
+          })),
+          released: releasedWithdrawals.map(w => ({
+            id: w._id,
+            amount: w.amount,
+            requestedAt: w.requestedAt,
+            releasedAt: w.releasedAt,
+            status: 'released',
+            message: 'Released - ready for processing'
+          })),
+          processing: processingWithdrawals.map(w => ({
+            id: w._id,
+            amount: w.amount,
+            status: 'processing'
+          }))
+        },
         ledger: balance.ledger.sort((a, b) => new Date(b.date) - new Date(a.date))
       }
     });
@@ -72,15 +99,12 @@ exports.requestWithdrawal = async (req, res, next) => {
 
     logger.info('Processing withdrawal request', { sellerId, amount });
 
-    // Validate amount
     if (!amount || amount <= 0) {
       return next(new ErrorResponse('Please provide a valid withdrawal amount', 400));
     }
 
-    // Get seller balance
     const balance = await SellerBalance.getOrCreate(sellerId);
 
-    // Check if sufficient balance
     if (balance.currentBalance < amount) {
       logger.warn('Insufficient balance for withdrawal', {
         sellerId,
@@ -93,14 +117,21 @@ exports.requestWithdrawal = async (req, res, next) => {
       ));
     }
 
-    // Record withdrawal request
+    const paidOrders = await Order.find({
+      seller: sellerId,
+      paymentStatus: 'completed',
+      status: { $ne: 'delivered' }
+    }).select('_id orderNumber totalPrice status').sort({ createdAt: -1 });
+
+    const orderIds = paidOrders.map(o => o._id);
+
     await balance.recordWithdrawal(amount, {
       notes,
       requestedBy: sellerId,
-      phoneNumber: req.user.phone
+      phoneNumber: req.user.phone,
+      orderIds
     });
 
-    // Emit Socket event to admin users
     if (global.io) {
       global.io.emit('withdrawal:request', {
         sellerId,
@@ -109,6 +140,7 @@ exports.requestWithdrawal = async (req, res, next) => {
         sellerPhone: req.user.phone,
         amount,
         notes,
+        orderCount: orderIds.length,
         requestedAt: new Date().toISOString()
       });
 
@@ -122,17 +154,20 @@ exports.requestWithdrawal = async (req, res, next) => {
       success: true,
       sellerId,
       amount,
+      orderIds: orderIds.length,
       remainingBalance: balance.currentBalance
     });
 
     res.json({
       success: true,
-      message: 'Withdrawal request submitted successfully',
+      message: 'Withdrawal request submitted. It will be processed after buyer confirms delivery.',
       data: {
         withdrawalAmount: amount,
         currentBalance: balance.currentBalance,
         pendingWithdrawals: balance.pendingWithdrawals,
-        status: 'pending'
+        linkedOrders: orderIds.length,
+        status: 'pending',
+        note: 'Withdrawal will be released when buyers confirm delivery of linked orders.'
       }
     });
   } catch (error) {
@@ -142,7 +177,6 @@ exports.requestWithdrawal = async (req, res, next) => {
       amount: req.body.amount
     });
 
-    // Handle specific error for insufficient balance
     if (error.message === 'Insufficient balance') {
       return next(new ErrorResponse('Insufficient balance for withdrawal', 400));
     }

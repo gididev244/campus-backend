@@ -549,24 +549,34 @@ exports.deleteReview = async (req, res, next) => {
  */
 exports.getWithdrawalRequests = async (req, res, next) => {
   try {
-    const { status = 'pending', page = 1, limit = 20 } = req.query;
+    const { status, page = 1, limit = 20 } = req.query;
     const skip = (page - 1) * limit;
 
-    const balances = await SellerBalance.find({
-      'withdrawalRequests.status': status
-    }).populate('seller', 'name email phone').lean();
+    const query = status 
+      ? { 'withdrawalRequests.status': status }
+      : {};
+
+    const balances = await SellerBalance.find(query)
+      .populate('seller', 'name email phone')
+      .lean();
 
     const withdrawalRequests = [];
     balances.forEach(balance => {
       balance.withdrawalRequests.forEach(request => {
-        if (request.status === status) {
+        if (!status || request.status === status) {
           withdrawalRequests.push({
             ...request,
             sellerId: balance.seller._id,
             sellerName: balance.seller.name,
             sellerEmail: balance.seller.email,
             sellerPhone: balance.seller.phone,
-            currentBalance: balance.currentBalance
+            currentBalance: balance.currentBalance,
+            canProcess: request.status === 'released',
+            statusMessage: request.status === 'pending' 
+              ? 'Waiting for buyer to confirm delivery' 
+              : request.status === 'released'
+              ? 'Ready for processing - buyer confirmed delivery'
+              : request.status
           });
         }
       });
@@ -614,6 +624,20 @@ exports.processWithdrawalRequest = async (req, res, next) => {
 
     if (!withdrawalRequest) {
       return next(new ErrorResponse('Withdrawal request not found', 404));
+    }
+
+    if (withdrawalRequest.status === 'pending' && status === 'completed') {
+      return next(new ErrorResponse(
+        'Cannot process pending withdrawal. Wait for buyer to confirm delivery first.',
+        400
+      ));
+    }
+
+    if (status === 'completed' && withdrawalRequest.status !== 'released') {
+      return next(new ErrorResponse(
+        'Only released withdrawals can be processed. Waiting for buyer confirmation.',
+        400
+      ));
     }
 
     withdrawalRequest.status = status;

@@ -47,12 +47,19 @@ const sellerBalanceSchema = new mongoose.Schema({
     },
     status: {
       type: String,
-      enum: ['pending', 'processing', 'completed', 'cancelled'],
+      enum: ['pending', 'released', 'processing', 'completed', 'cancelled'],
       default: 'pending'
     },
+    orderIds: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Order'
+    }],
     requestedAt: {
       type: Date,
       default: Date.now
+    },
+    releasedAt: {
+      type: Date
     },
     processedAt: {
       type: Date
@@ -84,7 +91,7 @@ const sellerBalanceSchema = new mongoose.Schema({
     description: String,
     status: {
       type: String,
-      enum: ['pending', 'completed', 'failed'],
+      enum: ['pending', 'released', 'completed', 'failed'],
       default: 'completed'
     },
     mpesaTransactionId: {
@@ -138,12 +145,12 @@ sellerBalanceSchema.methods.recordWithdrawal = function(amount, metadata = {}) {
   this.withdrawnTotal += amount;
   this.pendingWithdrawals += amount;
 
-  // Create withdrawal request record
   const withdrawalId = new mongoose.Types.ObjectId();
   this.withdrawalRequests.push({
     _id: withdrawalId,
     amount: amount,
     status: 'pending',
+    orderIds: metadata.orderIds || [],
     requestedAt: new Date(),
     notes: metadata.notes,
     metadata: {
@@ -152,18 +159,18 @@ sellerBalanceSchema.methods.recordWithdrawal = function(amount, metadata = {}) {
     }
   });
 
-  // Create ledger entry linked to withdrawal request
   this.ledger.push({
     type: 'withdrawal',
     amount: amount,
     balance: this.currentBalance,
     withdrawalId: withdrawalId,
-    description: 'Withdrawal request',
+    description: 'Withdrawal request - pending buyer confirmation',
     status: 'pending',
     date: new Date(),
     metadata: {
       ...metadata,
-      requestedAt: new Date()
+      requestedAt: new Date(),
+      orderCount: metadata.orderIds ? metadata.orderIds.length : 0
     }
   });
 
@@ -212,6 +219,44 @@ sellerBalanceSchema.methods.confirmWithdrawal = async function(withdrawalId, adm
   }
 
   return this.save();
+};
+
+// Method to release pending withdrawal when buyer confirms delivery
+sellerBalanceSchema.methods.releaseWithdrawalForOrder = async function(orderId) {
+  const pendingWithdrawals = this.withdrawalRequests.filter(
+    wr => wr.status === 'pending' && wr.orderIds.some(oid => oid.toString() === orderId.toString())
+  );
+
+  for (const withdrawal of pendingWithdrawals) {
+    withdrawal.status = 'released';
+    withdrawal.releasedAt = new Date();
+    withdrawal.metadata = {
+      ...withdrawal.metadata,
+      releasedDueToOrder: orderId,
+      releasedAt: new Date()
+    };
+
+    const ledgerEntry = this.ledger.find(
+      e => e.withdrawalId && e.withdrawalId.toString() === withdrawal._id.toString()
+    );
+    if (ledgerEntry) {
+      ledgerEntry.status = 'released';
+      ledgerEntry.description = 'Withdrawal released - buyer confirmed delivery';
+    }
+  }
+
+  if (pendingWithdrawals.length > 0) {
+    return this.save();
+  }
+  return this;
+};
+
+// Static to find released withdrawals ready for processing
+sellerBalanceSchema.statics.findReleasedWithdrawals = async function(sellerId) {
+  const balance = await this.findOne({ seller: sellerId });
+  if (!balance) return [];
+  
+  return balance.withdrawalRequests.filter(wr => wr.status === 'released');
 };
 
 // Static to get or create balance for seller

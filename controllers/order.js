@@ -788,24 +788,45 @@ exports.confirmReceived = async (req, res, next) => {
       return next(new ErrorResponse('Order not found', 404));
     }
 
-    // Check if user is the buyer
     if (order.buyer.toString() !== req.user.id) {
       return next(new ErrorResponse('Only the buyer can confirm receipt', 403));
     }
 
-    // Check if order is shipped
     if (order.status !== 'shipped') {
       return next(new ErrorResponse('Can only confirm receipt after order is shipped', 400));
     }
 
-    // Update order status to delivered
     order.status = 'delivered';
     order.deliveredAt = Date.now();
     order.autoConfirmed = false;
 
     await order.save();
 
-    // Trigger auto-payout
+    const SellerBalance = require('../models/SellerBalance');
+    try {
+      const sellerBalance = await SellerBalance.findOne({ seller: order.seller._id });
+      if (sellerBalance) {
+        await sellerBalance.releaseWithdrawalForOrder(order._id);
+        logger.order('withdrawal_released', {
+          orderId: order._id,
+          sellerId: order.seller._id
+        });
+
+        if (global.io) {
+          global.io.to(`user:${order.seller._id}`).emit('withdrawal:released', {
+            orderId: order._id,
+            orderNumber: order.orderNumber,
+            message: 'Your pending withdrawal has been released for processing.'
+          });
+        }
+      }
+    } catch (releaseError) {
+      logger.error('Failed to release withdrawal', {
+        error: releaseError.message,
+        orderId: order._id
+      });
+    }
+
     try {
       const { triggerAutoPayout } = require('../controllers/payments');
       await triggerAutoPayout(order._id.toString());
@@ -813,7 +834,6 @@ exports.confirmReceived = async (req, res, next) => {
       console.error('Auto-payout failed:', payoutError);
     }
 
-    // Notify seller via socket
     if (global.io) {
       global.io.to(`user:${order.seller._id}`).emit('order:delivered', {
         orderId: order._id.toString(),
@@ -830,7 +850,7 @@ exports.confirmReceived = async (req, res, next) => {
 
     res.json({
       success: true,
-      message: 'Order confirmed as received',
+      message: 'Order confirmed as received. Seller withdrawal released for processing.',
       order
     });
   } catch (error) {
