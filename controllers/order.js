@@ -392,6 +392,29 @@ exports.mpesaCallback = async (req, res, next) => {
 
       console.log('Payment successful for order:', order.orderNumber, 'M-Pesa:', mpesaReceiptNumber);
     } else {
+      // Payment failed
+      order.paymentStatus = 'failed';
+      order.status = 'cancelled';
+      order.cancellationReason = 'payment-failed';
+
+      // Update product status back to available
+      const product = await Product.findById(order.product);
+      if (product) {
+        product.status = 'available';
+        await product.save();
+      }
+
+      await order.save();
+
+      console.log('Payment failed for order:', order.orderNumber, ResultDesc);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('M-Pesa callback error:', error);
+    res.json({ success: false, message: 'Callback processing failed' });
+  }
+};
 
 // @desc    Get admin payout ledger (orders needing seller payout)
 // @route   GET /api/admin/payouts/ledger
