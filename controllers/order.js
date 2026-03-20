@@ -436,21 +436,35 @@ exports.mpesaCallback = async (req, res, next) => {
 
       // Emit socket events for real-time updates
       if (global.io) {
-        // Notify seller
-        global.io.to(`user:${order.seller._id}`).emit('order:new', {
+        // Notify buyer of payment confirmation
+        global.io.to(`user:${order.buyer._id}`).emit('order:updated', {
           orderId: order._id,
           orderNumber: order.orderNumber,
+          status: 'confirmed',
+          paymentStatus: 'completed',
+          message: 'Payment confirmed! Your order is being processed.'
+        });
+
+        // Notify seller of new confirmed order
+        global.io.to(`user:${order.seller._id}`).emit('order:updated', {
+          orderId: order._id,
+          orderNumber: order.orderNumber,
+          status: 'confirmed',
+          paymentStatus: 'completed',
           amount: order.totalPrice,
           buyerName: populatedOrder.buyer?.name || 'Buyer',
-          productName: populatedOrder.product?.title || 'Product'
+          productName: populatedOrder.product?.title || 'Product',
+          message: 'New order received! Payment confirmed.'
         });
 
         // Notify all admins
         const admins = await User.find({ role: 'admin' });
         admins.forEach(admin => {
-          global.io.to(`user:${admin._id}`).emit('order:new', {
+          global.io.to(`user:${admin._id}`).emit('order:updated', {
             orderId: order._id,
             orderNumber: order.orderNumber,
+            status: 'confirmed',
+            paymentStatus: 'completed',
             amount: order.totalPrice,
             buyerName: populatedOrder.buyer?.name || 'Buyer',
             sellerName: populatedOrder.seller?.name || 'Seller',
