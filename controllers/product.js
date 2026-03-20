@@ -1,5 +1,7 @@
 const Product = require('../models/Product');
 const Category = require('../models/Category');
+const Order = require('../models/Order');
+const User = require('../models/User');
 const mongoose = require('mongoose');
 const { formatPaginationResponse, getPagination, asyncHandler } = require('../utils/helpers');
 const { validateCategory } = require('../utils/validation');
@@ -594,6 +596,30 @@ exports.bulkRevertProductStatus = async (req, res, next) => {
       success: true,
       message: `Reverted ${result.modifiedCount} product(s) to available`,
       count: result.modifiedCount
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getPlatformStats = async (req, res, next) => {
+  try {
+    const [productCount, userCount, orderStats] = await Promise.all([
+      Product.countDocuments({ status: 'available' }),
+      User.countDocuments({ isActive: { $ne: false } }),
+      Order.aggregate([
+        { $match: { paymentStatus: 'completed' } },
+        { $count: 'total' }
+      ])
+    ]);
+
+    res.json({
+      success: true,
+      stats: {
+        products: productCount,
+        users: userCount,
+        transactions: orderStats[0]?.total || 0
+      }
     });
   } catch (error) {
     next(error);

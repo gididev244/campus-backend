@@ -12,7 +12,8 @@ const {
   getRelatedProducts,
   getSoldProducts,
   revertProductStatus,
-  bulkRevertProductStatus
+  bulkRevertProductStatus,
+  getPlatformStats
 } = require('../controllers/product');
 const { protect, authorize, optionalAuth } = require('../middleware/auth');
 const { handleUploadError, uploadMultiple } = require('../middleware/upload');
@@ -31,6 +32,7 @@ const createProductValidation = [
 ];
 
 // Public routes
+router.get('/stats/platform', getPlatformStats);
 router.get('/', optionalAuth, getProducts);
 router.get('/seller/:sellerId', getSellerProducts);
 router.get('/:id/related', getRelatedProducts);
