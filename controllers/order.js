@@ -330,37 +330,38 @@ exports.mpesaCallback = async (req, res, next) => {
     }
 
     if (ResultCode === 0) {
-      // Success
-      const { MpesaReceiptNumber, PhoneNumber } = stkCallback.CallbackMetadata.Item;
-      const mpesaReceipt = MpesaReceiptNumber?.value;
-      const mpesaPhone = PhoneNumber?.value;
-      
-      for (const item of stkCallback.CallbackMetadata.Item) {
+      // Success - Extract M-Pesa details from callback metadata
+      const callbackItems = stkCallback.CallbackMetadata?.Item || [];
+      let mpesaReceiptNumber = null;
+      let mpesaPhoneNumber = null;
+
+      for (const item of callbackItems) {
         if (item.Name === 'MpesaReceiptNumber') {
           mpesaReceiptNumber = item.Value;
         } else if (item.Name === 'PhoneNumber') {
-          mpesaPhone = item.Value;
+          mpesaPhoneNumber = item.Value;
         }
       }
-      
+
       order.paymentStatus = 'completed';
-      order.mpesaTransactionId = MpesaReceiptNumber;
+      order.mpesaTransactionId = mpesaReceiptNumber;
+      order.mpesaPhoneNumber = mpesaPhoneNumber;
+      order.mpesaResultCode = ResultCode.toString();
+      order.mpesaResultDesc = ResultDesc;
       order.status = 'confirmed';
-      
+
+      // Update product status to sold
       const product = await Product.findById(order.product);
       if (product) {
         product.status = 'sold';
         product.soldAt = Date.now();
         await product.save();
       }
-      
+
       // Add balance to seller ledger
       const SellerBalance = require('../models/SellerBalance');
-      const balance = await SellerBalance.getOrCreate(order.seller.toString());
-      if (!balance) {
-        balance = await SellerBalance.create({ seller: order.seller.toString() });
-      }
-      
+      let balance = await SellerBalance.getOrCreate(order.seller.toString());
+
       // Add sale entry in ledger with M-Pesa code
       balance.ledger.push({
         type: 'sale',
@@ -369,29 +370,28 @@ exports.mpesaCallback = async (req, res, next) => {
         description: `Sale from order ${order.orderNumber}`,
         status: 'completed',
         orderId: order._id,
-        mpesaTransactionId: MpesaReceiptNumber,
-        mpesaReceiptNumber: MpesaReceiptNumber,
+        mpesaTransactionId: mpesaReceiptNumber,
+        mpesaReceiptNumber: mpesaReceiptNumber,
         date: new Date()
       });
-      
+
+      // Update seller's total earnings and current balance
+      balance.totalEarnings = (balance.totalEarnings || 0) + order.totalPrice;
+      balance.currentBalance = (balance.currentBalance || 0) + order.totalPrice;
+      balance.totalOrders = (balance.totalOrders || 0) + 1;
+
+      await balance.save();
       await order.save();
 
-      logger.info('Payment successful for order:', {
+      logger.info('Payment successful for order', {
         orderNumber: order.orderNumber,
         amount: order.totalPrice,
-        sellerId: order.seller._id,
-        mpesaTransactionId: MpesaReceiptNumber,
-        mpesaReceiptNumber: MpesaReceiptNumber
+        sellerId: order.seller,
+        mpesaTransactionId: mpesaReceiptNumber
       });
-    } catch (error) {
-      console.error('Error updating seller balance:', error);
-    }
-  } finally {
-    res.json({ success: true });
-  } catch (error) {
-    next(error);
-  }
-};
+
+      console.log('Payment successful for order:', order.orderNumber, 'M-Pesa:', mpesaReceiptNumber);
+    } else {
 
 // @desc    Get admin payout ledger (orders needing seller payout)
 // @route   GET /api/admin/payouts/ledger
