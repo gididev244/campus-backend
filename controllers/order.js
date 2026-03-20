@@ -1,9 +1,11 @@
 const Order = require('../models/Order');
 const Product = require('../models/Product');
+const User = require('../models/User');
 const { initiateSTKPush, validatePhoneNumber } = require('../utils/mpesa');
 const { formatPaginationResponse, getPagination } = require('../utils/helpers');
 const ErrorResponse = require('../middleware/error').ErrorResponse;
 const logger = require('../utils/logger');
+const { createNotification } = require('../utils/notifications');
 
 // @desc    Create new order
 // @route   POST /api/orders
@@ -148,12 +150,14 @@ exports.getOrder = async (req, res, next) => {
 // @access  Private
 exports.getOrders = async (req, res, next) => {
   try {
-    const { page = 1, limit = 10, status, as } = req.query;
+    const { page = 1, limit = 10, status, as, paymentStatus } = req.query;
     const { skip, limit: limitNum, page: pageNum } = getPagination(page, limit);
 
     // Build query based on user role
     const query = {};
-    if (as === 'seller' || req.user.role === 'seller') {
+    if (as === 'admin' || req.user.role === 'admin') {
+      // Admin sees all orders - no user filter
+    } else if (as === 'seller' || req.user.role === 'seller') {
       query.seller = req.user.id;
     } else {
       query.buyer = req.user.id;
@@ -162,6 +166,11 @@ exports.getOrders = async (req, res, next) => {
     // Add status filter if provided
     if (status) {
       query.status = status;
+    }
+
+    // Add paymentStatus filter if provided
+    if (paymentStatus) {
+      query.paymentStatus = paymentStatus;
     }
 
     const orders = await Order.find(query)
@@ -382,6 +391,73 @@ exports.mpesaCallback = async (req, res, next) => {
 
       await balance.save();
       await order.save();
+
+      // Populate order for notifications
+      const populatedOrder = await Order.findById(order._id)
+        .populate('buyer', 'name email')
+        .populate('seller', 'name email')
+        .populate('product', 'title');
+
+      // Send notification to buyer
+      try {
+        await createNotification({
+          recipient: order.buyer._id,
+          sender: order.seller._id,
+          type: 'order',
+          title: 'Payment Successful!',
+          message: `Your payment of KES ${order.totalPrice.toLocaleString()} for order #${order.orderNumber} has been confirmed.`,
+          data: {
+            orderId: order._id,
+            orderNumber: order.orderNumber,
+            link: `/buyer/orders/${order._id}`
+          }
+        });
+      } catch (notifError) {
+        console.error('Failed to create buyer notification:', notifError);
+      }
+
+      // Send notification to seller
+      try {
+        await createNotification({
+          recipient: order.seller._id,
+          sender: order.buyer._id,
+          type: 'order',
+          title: 'New Order Received!',
+          message: `You have a new order #${order.orderNumber} for KES ${order.totalPrice.toLocaleString()}.`,
+          data: {
+            orderId: order._id,
+            orderNumber: order.orderNumber,
+            link: `/seller/orders`
+          }
+        });
+      } catch (notifError) {
+        console.error('Failed to create seller notification:', notifError);
+      }
+
+      // Emit socket events for real-time updates
+      if (global.io) {
+        // Notify seller
+        global.io.to(`user:${order.seller._id}`).emit('order:new', {
+          orderId: order._id,
+          orderNumber: order.orderNumber,
+          amount: order.totalPrice,
+          buyerName: populatedOrder.buyer?.name || 'Buyer',
+          productName: populatedOrder.product?.title || 'Product'
+        });
+
+        // Notify all admins
+        const admins = await User.find({ role: 'admin' });
+        admins.forEach(admin => {
+          global.io.to(`user:${admin._id}`).emit('order:new', {
+            orderId: order._id,
+            orderNumber: order.orderNumber,
+            amount: order.totalPrice,
+            buyerName: populatedOrder.buyer?.name || 'Buyer',
+            sellerName: populatedOrder.seller?.name || 'Seller',
+            productName: populatedOrder.product?.title || 'Product'
+          });
+        });
+      }
 
       logger.info('Payment successful for order', {
         orderNumber: order.orderNumber,
