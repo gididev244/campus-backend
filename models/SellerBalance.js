@@ -87,6 +87,14 @@ const sellerBalanceSchema = new mongoose.Schema({
       enum: ['pending', 'completed', 'failed'],
       default: 'completed'
     },
+    mpesaTransactionId: {
+      type: String,
+      default: null
+    },
+    mpesaReceiptNumber: {
+      type: String,
+      default: null
+    },
     withdrawalId: {
       type: mongoose.Schema.Types.ObjectId
     },

@@ -332,44 +332,64 @@ exports.mpesaCallback = async (req, res, next) => {
     if (ResultCode === 0) {
       // Success
       const { MpesaReceiptNumber, PhoneNumber } = stkCallback.CallbackMetadata.Item;
-
+      const mpesaReceipt = MpesaReceiptNumber?.value;
+      const mpesaPhone = PhoneNumber?.value;
+      
+      for (const item of stkCallback.CallbackMetadata.Item) {
+        if (item.Name === 'MpesaReceiptNumber') {
+          mpesaReceiptNumber = item.Value;
+        } else if (item.Name === 'PhoneNumber') {
+          mpesaPhone = item.Value;
+        }
+      }
+      
       order.paymentStatus = 'completed';
       order.mpesaTransactionId = MpesaReceiptNumber;
       order.status = 'confirmed';
-
-      // Update product status to sold
+      
       const product = await Product.findById(order.product);
       if (product) {
         product.status = 'sold';
         product.soldAt = Date.now();
         await product.save();
       }
-
-      await order.save();
-
-      console.log('Payment successful for order:', order.orderNumber);
-    } else {
-      // Failed
-      order.paymentStatus = 'failed';
-      order.status = 'cancelled';
-      order.cancellationReason = 'payment-failed';
-
-      // Update product status back to available
-      const product = await Product.findById(order.product);
-      if (product) {
-        product.status = 'available';
-        await product.save();
+      
+      // Add balance to seller ledger
+      const SellerBalance = require('../models/SellerBalance');
+      const balance = await SellerBalance.getOrCreate(order.seller.toString());
+      if (!balance) {
+        balance = await SellerBalance.create({ seller: order.seller.toString() });
       }
-
+      
+      // Add sale entry in ledger with M-Pesa code
+      balance.ledger.push({
+        type: 'sale',
+        amount: order.totalPrice,
+        balance: balance.currentBalance,
+        description: `Sale from order ${order.orderNumber}`,
+        status: 'completed',
+        orderId: order._id,
+        mpesaTransactionId: MpesaReceiptNumber,
+        mpesaReceiptNumber: MpesaReceiptNumber,
+        date: new Date()
+      });
+      
       await order.save();
 
-      console.log('Payment failed for order:', order.orderNumber, ResultDesc);
+      logger.info('Payment successful for order:', {
+        orderNumber: order.orderNumber,
+        amount: order.totalPrice,
+        sellerId: order.seller._id,
+        mpesaTransactionId: MpesaReceiptNumber,
+        mpesaReceiptNumber: MpesaReceiptNumber
+      });
+    } catch (error) {
+      console.error('Error updating seller balance:', error);
     }
-
+  } finally {
     res.json({ success: true });
   } catch (error) {
-    console.error('M-Pesa callback error:', error);
-    res.json({ success: false, message: 'Callback processing failed' });
+    next(error);
   }
 };
 
